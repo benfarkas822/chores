@@ -77,7 +77,6 @@ export const CUISINES = [
   "Egyptian",
   "French",
   "Greek",
-  "Indian",
   "Irish",
   "Italian",
   "Jamaican",

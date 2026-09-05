@@ -192,6 +192,15 @@ export default function RecipesBoard() {
           >
             {error}
           </div>
+        ) : !loading && recipes.length === 0 ? (
+          <div
+            className="rounded-[14px] border border-dashed py-8 px-3 text-center text-[13.5px] font-semibold"
+            style={{ borderColor: "var(--dashed-border)", color: "var(--text-muted)" }}
+          >
+            {selectedCuisine === SURPRISE_ME
+              ? "No recipes found — try shuffling again."
+              : `No ${selectedCuisine} recipes available right now — try another cuisine or Surprise Me.`}
+          </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
             {(loading ? Array.from({ length: RECIPE_COUNT }) : recipes).map((recipe, idx) => {
