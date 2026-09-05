@@ -1,101 +1,276 @@
-import Image from "next/image";
+"use client";
+
+import { useEffect, useState, useRef } from "react";
+
+type ColumnId = "backlog" | "todo" | "done";
+
+type Task = {
+  id: string;
+  title: string;
+  column: ColumnId;
+};
+
+const STORAGE_KEY = "chore-kanban-tasks";
+
+const DEFAULT_TASKS: Task[] = [
+  "Wash Dishes",
+  "Dry & Put Away Dishes",
+  "Wipe Counters",
+  "Clean Bathroom",
+  "Clean Toilet",
+  "Take Out Trash",
+  "Take Out Recycling",
+  "Vacuum Living Room",
+  "Mop Kitchen Floor",
+  "Dust Shelves & Surfaces",
+  "Change Bed Sheets",
+  "Do Laundry",
+  "Hang Laundry to Dry",
+  "Water Houseplants",
+  "Wipe Down Stove",
+  "Clean Fridge Inside",
+  "Clean Windows",
+  "Descale Kettle",
+].map((title) => ({ id: crypto.randomUUID(), title, column: "backlog" as ColumnId }));
+
+const COLUMNS: { id: ColumnId; title: string }[] = [
+  { id: "backlog", title: "Backlog" },
+  { id: "todo", title: "To Do" },
+  { id: "done", title: "Done" },
+];
+
+function loadTasks(): Task[] {
+  if (typeof window === "undefined") return DEFAULT_TASKS;
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEY);
+    if (!raw) return DEFAULT_TASKS;
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    return DEFAULT_TASKS;
+  } catch {
+    return DEFAULT_TASKS;
+  }
+}
+
+function sendToAppleReminders(title: string) {
+  const encoded = encodeURIComponent(title);
+  const url = `shortcuts://run-shortcut?name=AddKanbanChore&input=${encoded}`;
+  window.location.href = url;
+}
 
 export default function Home() {
-  return (
-    <div className="grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20 font-[family-name:var(--font-geist-sans)]">
-      <main className="flex flex-col gap-8 row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="https://nextjs.org/icons/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="list-inside list-decimal text-sm text-center sm:text-left font-[family-name:var(--font-geist-mono)]">
-          <li className="mb-2">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] px-1 py-0.5 rounded font-semibold">
-              app/page.tsx
-            </code>
-            .
-          </li>
-          <li>Save and see your changes instantly.</li>
-        </ol>
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [newTaskTitle, setNewTaskTitle] = useState("");
+  const [dragOverColumn, setDragOverColumn] = useState<ColumnId | null>(null);
+  const [activeTab, setActiveTab] = useState<ColumnId>("backlog");
+  const hasHydrated = useRef(false);
 
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
+  // Hydrate from localStorage on mount
+  useEffect(() => {
+    setTasks(loadTasks());
+    hasHydrated.current = true;
+  }, []);
+
+  // Persist to localStorage whenever tasks change (after initial hydration)
+  useEffect(() => {
+    if (!hasHydrated.current) return;
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(tasks));
+  }, [tasks]);
+
+  function addTask() {
+    const title = newTaskTitle.trim();
+    if (!title) return;
+    setTasks((prev) => [
+      ...prev,
+      { id: crypto.randomUUID(), title, column: "backlog" },
+    ]);
+    setNewTaskTitle("");
+  }
+
+  function deleteTask(id: string) {
+    setTasks((prev) => prev.filter((t) => t.id !== id));
+  }
+
+  function moveTask(id: string, column: ColumnId) {
+    setTasks((prev) =>
+      prev.map((t) => (t.id === id ? { ...t, column } : t))
+    );
+  }
+
+  // Native HTML5 drag-and-drop — works with a mouse, but iOS Safari does not
+  // fire these touch events, so the tap-based move buttons below are the
+  // primary way to move cards on a phone.
+  function handleDragStart(e: React.DragEvent, taskId: string) {
+    e.dataTransfer.setData("text/plain", taskId);
+    e.dataTransfer.effectAllowed = "move";
+  }
+
+  function handleDragOver(e: React.DragEvent, columnId: ColumnId) {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    if (dragOverColumn !== columnId) setDragOverColumn(columnId);
+  }
+
+  function handleDragLeave(columnId: ColumnId) {
+    setDragOverColumn((prev) => (prev === columnId ? null : prev));
+  }
+
+  function handleDrop(e: React.DragEvent, columnId: ColumnId) {
+    e.preventDefault();
+    const taskId = e.dataTransfer.getData("text/plain");
+    if (taskId) moveTask(taskId, columnId);
+    setDragOverColumn(null);
+  }
+
+  return (
+    <main className="min-h-screen bg-gray-950 text-gray-100 px-4 py-6 sm:p-10">
+      <div className="max-w-6xl mx-auto">
+        <header className="mb-5 sm:mb-8">
+          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">
+            Household Chores
+          </h1>
+          <p className="text-gray-400 mt-1 text-sm sm:text-base">
+            Move a chore to{" "}
+            <span className="text-gray-200 font-medium">To Do</span> to push
+            it to Apple Reminders on your iPhone.
+          </p>
+        </header>
+
+        <div className="flex gap-2 mb-5 sm:mb-8">
+          <input
+            type="text"
+            value={newTaskTitle}
+            onChange={(e) => setNewTaskTitle(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && addTask()}
+            placeholder="Add a new chore..."
+            className="flex-1 min-w-0 bg-gray-900 border border-gray-800 rounded-lg px-4 py-3 text-base sm:text-sm placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+          />
+          <button
+            onClick={addTask}
+            className="bg-indigo-600 hover:bg-indigo-500 active:bg-indigo-700 transition-colors text-white font-medium px-5 py-3 rounded-lg text-sm shrink-0"
           >
-            <Image
-              className="dark:invert"
-              src="https://nextjs.org/icons/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
-            />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:min-w-44"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
+            Add
+          </button>
         </div>
-      </main>
-      <footer className="row-start-3 flex gap-6 flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="https://nextjs.org/icons/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
-          />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="https://nextjs.org/icons/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="https://nextjs.org/icons/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
-      </footer>
-    </div>
+
+        {/* Mobile tab switcher — replaces stacked columns below sm breakpoint */}
+        <div className="flex sm:hidden gap-2 mb-4">
+          {COLUMNS.map((column) => {
+            const count = tasks.filter((t) => t.column === column.id).length;
+            const isActive = activeTab === column.id;
+            return (
+              <button
+                key={column.id}
+                onClick={() => setActiveTab(column.id)}
+                className={`flex-1 flex items-center justify-center gap-1.5 rounded-lg py-2.5 text-sm font-medium transition-colors ${
+                  isActive
+                    ? "bg-indigo-600 text-white"
+                    : "bg-gray-900 text-gray-400 border border-gray-800"
+                }`}
+              >
+                {column.title}
+                <span
+                  className={`text-xs rounded-full px-1.5 ${
+                    isActive ? "bg-indigo-500" : "bg-gray-800"
+                  }`}
+                >
+                  {count}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 sm:gap-5">
+          {COLUMNS.map((column, columnIndex) => {
+            const columnTasks = tasks.filter((t) => t.column === column.id);
+            const isDragOver = dragOverColumn === column.id;
+            const prevColumn = COLUMNS[columnIndex - 1];
+            const nextColumn = COLUMNS[columnIndex + 1];
+
+            return (
+              <div
+                key={column.id}
+                onDragOver={(e) => handleDragOver(e, column.id)}
+                onDragLeave={() => handleDragLeave(column.id)}
+                onDrop={(e) => handleDrop(e, column.id)}
+                className={`${
+                  activeTab === column.id ? "block" : "hidden"
+                } sm:block rounded-xl border p-3 sm:p-4 min-h-[60vh] sm:min-h-[420px] transition-colors ${
+                  isDragOver
+                    ? "border-indigo-500 bg-indigo-950/20"
+                    : "border-gray-800 bg-gray-900/50"
+                }`}
+              >
+                <div className="hidden sm:flex items-center justify-between mb-4">
+                  <h2 className="font-semibold text-sm uppercase tracking-wide text-gray-300">
+                    {column.title}
+                  </h2>
+                  <span className="text-xs bg-gray-800 text-gray-400 rounded-full px-2 py-0.5">
+                    {columnTasks.length}
+                  </span>
+                </div>
+
+                <div className="flex flex-col gap-3">
+                  {columnTasks.map((task) => (
+                    <div
+                      key={task.id}
+                      draggable
+                      onDragStart={(e) => handleDragStart(e, task.id)}
+                      className="group bg-gray-800 border border-gray-700 rounded-lg p-3.5 sm:p-3 cursor-grab active:cursor-grabbing shadow-sm hover:border-gray-600 transition-colors"
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <p className="text-sm text-gray-100">{task.title}</p>
+                        <button
+                          onClick={() => deleteTask(task.id)}
+                          className="text-gray-500 hover:text-red-400 active:text-red-400 text-sm sm:text-xs sm:opacity-0 sm:group-hover:opacity-100 transition-opacity shrink-0 leading-none p-1 -m-1"
+                          aria-label="Delete chore"
+                        >
+                          ✕
+                        </button>
+                      </div>
+
+                      <div className="flex gap-2 mt-3">
+                        {prevColumn && (
+                          <button
+                            onClick={() => moveTask(task.id, prevColumn.id)}
+                            className="flex-1 bg-gray-950 hover:bg-black active:bg-black border border-gray-700 text-gray-300 text-xs font-medium py-2 rounded-md transition-colors"
+                          >
+                            ← {prevColumn.title}
+                          </button>
+                        )}
+                        {nextColumn && (
+                          <button
+                            onClick={() => moveTask(task.id, nextColumn.id)}
+                            className="flex-1 bg-gray-950 hover:bg-black active:bg-black border border-gray-700 text-gray-300 text-xs font-medium py-2 rounded-md transition-colors"
+                          >
+                            {nextColumn.title} →
+                          </button>
+                        )}
+                      </div>
+
+                      {task.column === "todo" && (
+                        <button
+                          onClick={() => sendToAppleReminders(task.title)}
+                          className="mt-2 w-full flex items-center justify-center gap-1.5 bg-gray-950 hover:bg-black active:bg-black border border-gray-700 text-gray-200 text-xs font-medium py-2.5 rounded-md transition-colors"
+                        >
+                          🍎 Send to Apple Reminders
+                        </button>
+                      )}
+                    </div>
+                  ))}
+
+                  {columnTasks.length === 0 && (
+                    <div className="flex-1 flex items-center justify-center text-xs text-gray-600 border border-dashed border-gray-800 rounded-lg py-8">
+                      No chores here
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </main>
   );
 }
