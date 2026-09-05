@@ -152,6 +152,15 @@ function promoteDueTasks(tasks: Task[]): Task[] {
  * both on first load and whenever the tab regains focus (e.g. coming back
  * from the Shortcuts app on iOS).
  */
+
+/** Chores sorted by how soon (or how overdue) their next occurrence is. */
+export function getUpcomingTasks(tasks: Task[], limit = 5): Task[] {
+  return tasks
+    .filter((t) => t.column !== "todo" && t.nextDueAt !== null)
+    .sort((a, b) => (a.nextDueAt ?? 0) - (b.nextDueAt ?? 0))
+    .slice(0, limit);
+}
+
 export function useChoreTasks() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [pendingDelete, setPendingDelete] = useState<{ id: string; title: string } | null>(null);
