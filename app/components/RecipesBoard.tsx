@@ -3,9 +3,10 @@
 import { useEffect, useState } from "react";
 import { useChoreTasks, getUpcomingTasks } from "../hooks/useChoreTasks";
 import { useGroceryList } from "../hooks/useGroceryList";
-import { fetchRandomRecipes, Recipe } from "../lib/recipes";
+import { fetchRandomRecipes, fetchRecipesByCuisine, CUISINES, Recipe } from "../lib/recipes";
 
 const RECIPE_COUNT = 6;
+const SURPRISE_ME = "";
 
 function formatDueDate(timestamp: number): string {
   const isOverdue = timestamp < Date.now();
@@ -33,14 +34,18 @@ export default function RecipesBoard() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [selectedCuisine, setSelectedCuisine] = useState(SURPRISE_ME);
 
   const upcomingChores = getUpcomingTasks(tasks, 5);
 
-  async function loadRecipes() {
+  async function loadRecipes(cuisine: string) {
     setLoading(true);
     setError(null);
     try {
-      const result = await fetchRandomRecipes(RECIPE_COUNT);
+      const result =
+        cuisine === SURPRISE_ME
+          ? await fetchRandomRecipes(RECIPE_COUNT)
+          : await fetchRecipesByCuisine(cuisine, RECIPE_COUNT);
       setRecipes(result);
     } catch {
       setError("Couldn't load recipes — check your connection and try again.");
@@ -50,8 +55,13 @@ export default function RecipesBoard() {
   }
 
   useEffect(() => {
-    loadRecipes();
+    loadRecipes(SURPRISE_ME);
   }, []);
+
+  function handleSelectCuisine(cuisine: string) {
+    setSelectedCuisine(cuisine);
+    loadRecipes(cuisine);
+  }
 
   const uncheckedCount = items.filter((i) => !i.checked).length;
   const checkedCount = items.length - uncheckedCount;
@@ -138,13 +148,41 @@ export default function RecipesBoard() {
             Recipe Ideas
           </h2>
           <button
-            onClick={loadRecipes}
+            onClick={() => loadRecipes(selectedCuisine)}
             disabled={loading}
             className="ml-auto border-none rounded-full px-3 py-1 text-[11.5px] font-bold cursor-pointer disabled:opacity-50"
             style={{ background: "var(--badge-bg)", color: "var(--text-secondary)" }}
           >
             {loading ? "Shuffling…" : "🔀 Shuffle"}
           </button>
+        </div>
+
+        <div className="flex gap-1.5 mb-4 overflow-x-auto pb-1 px-2 -mx-2">
+          <button
+            onClick={() => handleSelectCuisine(SURPRISE_ME)}
+            className="shrink-0 border-none rounded-full px-3 py-1.5 text-[11.5px] font-bold cursor-pointer whitespace-nowrap"
+            style={
+              selectedCuisine === SURPRISE_ME
+                ? { background: "var(--accent)", color: "var(--accent-text)" }
+                : { background: "var(--pill-bg)", color: "var(--pill-text)" }
+            }
+          >
+            Surprise Me
+          </button>
+          {CUISINES.map((cuisine) => (
+            <button
+              key={cuisine}
+              onClick={() => handleSelectCuisine(cuisine)}
+              className="shrink-0 border-none rounded-full px-3 py-1.5 text-[11.5px] font-bold cursor-pointer whitespace-nowrap"
+              style={
+                selectedCuisine === cuisine
+                  ? { background: "var(--accent)", color: "var(--accent-text)" }
+                  : { background: "var(--pill-bg)", color: "var(--pill-text)" }
+              }
+            >
+              {cuisine}
+            </button>
+          ))}
         </div>
 
         {error ? (
