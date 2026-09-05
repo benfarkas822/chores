@@ -1,37 +1,7 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
-
-type ColumnId = "backlog" | "todo" | "done";
-
-type Task = {
-  id: string;
-  title: string;
-  column: ColumnId;
-};
-
-const STORAGE_KEY = "chore-kanban-tasks";
-
-const DEFAULT_TASKS: Task[] = [
-  "Wash Dishes",
-  "Dry & Put Away Dishes",
-  "Wipe Counters",
-  "Clean Bathroom",
-  "Clean Toilet",
-  "Take Out Trash",
-  "Take Out Recycling",
-  "Vacuum Living Room",
-  "Mop Kitchen Floor",
-  "Dust Shelves & Surfaces",
-  "Change Bed Sheets",
-  "Do Laundry",
-  "Hang Laundry to Dry",
-  "Water Houseplants",
-  "Wipe Down Stove",
-  "Clean Fridge Inside",
-  "Clean Windows",
-  "Descale Kettle",
-].map((title) => ({ id: crypto.randomUUID(), title, column: "backlog" as ColumnId }));
+import { useState } from "react";
+import { useChoreTasks, FREQUENCIES, ColumnId } from "./hooks/useChoreTasks";
 
 const COLUMNS: { id: ColumnId; title: string }[] = [
   { id: "backlog", title: "Backlog" },
@@ -39,17 +9,12 @@ const COLUMNS: { id: ColumnId; title: string }[] = [
   { id: "done", title: "Done" },
 ];
 
-function loadTasks(): Task[] {
-  if (typeof window === "undefined") return DEFAULT_TASKS;
-  try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) return DEFAULT_TASKS;
-    const parsed = JSON.parse(raw);
-    if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-    return DEFAULT_TASKS;
-  } catch {
-    return DEFAULT_TASKS;
-  }
+function formatDueDate(timestamp: number): string {
+  return new Date(timestamp).toLocaleDateString(undefined, {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+  });
 }
 
 function sendToAppleReminders(title: string) {
@@ -59,42 +24,14 @@ function sendToAppleReminders(title: string) {
 }
 
 export default function Home() {
-  const [tasks, setTasks] = useState<Task[]>([]);
+  const { tasks, addTask, deleteTask, moveTask, cycleFrequency } = useChoreTasks();
   const [newTaskTitle, setNewTaskTitle] = useState("");
   const [dragOverColumn, setDragOverColumn] = useState<ColumnId | null>(null);
   const [activeTab, setActiveTab] = useState<ColumnId>("backlog");
-  const hasHydrated = useRef(false);
 
-  // Hydrate from localStorage on mount
-  useEffect(() => {
-    setTasks(loadTasks());
-    hasHydrated.current = true;
-  }, []);
-
-  // Persist to localStorage whenever tasks change (after initial hydration)
-  useEffect(() => {
-    if (!hasHydrated.current) return;
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(tasks));
-  }, [tasks]);
-
-  function addTask() {
-    const title = newTaskTitle.trim();
-    if (!title) return;
-    setTasks((prev) => [
-      ...prev,
-      { id: crypto.randomUUID(), title, column: "backlog" },
-    ]);
+  function handleAdd() {
+    addTask(newTaskTitle);
     setNewTaskTitle("");
-  }
-
-  function deleteTask(id: string) {
-    setTasks((prev) => prev.filter((t) => t.id !== id));
-  }
-
-  function moveTask(id: string, column: ColumnId) {
-    setTasks((prev) =>
-      prev.map((t) => (t.id === id ? { ...t, column } : t))
-    );
   }
 
   // Native HTML5 drag-and-drop — works with a mouse, but iOS Safari does not
@@ -132,7 +69,8 @@ export default function Home() {
           <p className="text-gray-400 mt-1 text-sm sm:text-base">
             Move a chore to{" "}
             <span className="text-gray-200 font-medium">To Do</span> to push
-            it to Apple Reminders on your iPhone.
+            it to Apple Reminders on your iPhone. Completed recurring chores
+            reappear automatically when they&apos;re next due.
           </p>
         </header>
 
@@ -141,12 +79,12 @@ export default function Home() {
             type="text"
             value={newTaskTitle}
             onChange={(e) => setNewTaskTitle(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && addTask()}
+            onKeyDown={(e) => e.key === "Enter" && handleAdd()}
             placeholder="Add a new chore..."
             className="flex-1 min-w-0 bg-gray-900 border border-gray-800 rounded-lg px-4 py-3 text-base sm:text-sm placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500"
           />
           <button
-            onClick={addTask}
+            onClick={handleAdd}
             className="bg-indigo-600 hover:bg-indigo-500 active:bg-indigo-700 transition-colors text-white font-medium px-5 py-3 rounded-lg text-sm shrink-0"
           >
             Add
@@ -212,53 +150,71 @@ export default function Home() {
                 </div>
 
                 <div className="flex flex-col gap-3">
-                  {columnTasks.map((task) => (
-                    <div
-                      key={task.id}
-                      draggable
-                      onDragStart={(e) => handleDragStart(e, task.id)}
-                      className="group bg-gray-800 border border-gray-700 rounded-lg p-3.5 sm:p-3 cursor-grab active:cursor-grabbing shadow-sm hover:border-gray-600 transition-colors"
-                    >
-                      <div className="flex items-start justify-between gap-2">
-                        <p className="text-sm text-gray-100">{task.title}</p>
-                        <button
-                          onClick={() => deleteTask(task.id)}
-                          className="text-gray-500 hover:text-red-400 active:text-red-400 text-sm sm:text-xs sm:opacity-0 sm:group-hover:opacity-100 transition-opacity shrink-0 leading-none p-1 -m-1"
-                          aria-label="Delete chore"
-                        >
-                          ✕
-                        </button>
-                      </div>
-
-                      <div className="flex gap-2 mt-3">
-                        {prevColumn && (
+                  {columnTasks.map((task) => {
+                    const freq = FREQUENCIES.find((f) => f.id === task.frequency)!;
+                    return (
+                      <div
+                        key={task.id}
+                        draggable
+                        onDragStart={(e) => handleDragStart(e, task.id)}
+                        className="group bg-gray-800 border border-gray-700 rounded-lg p-3.5 sm:p-3 cursor-grab active:cursor-grabbing shadow-sm hover:border-gray-600 transition-colors"
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <p className="text-sm text-gray-100">{task.title}</p>
                           <button
-                            onClick={() => moveTask(task.id, prevColumn.id)}
-                            className="flex-1 bg-gray-950 hover:bg-black active:bg-black border border-gray-700 text-gray-300 text-xs font-medium py-2 rounded-md transition-colors"
+                            onClick={() => deleteTask(task.id)}
+                            className="text-gray-500 hover:text-red-400 active:text-red-400 text-sm sm:text-xs sm:opacity-0 sm:group-hover:opacity-100 transition-opacity shrink-0 leading-none p-1 -m-1"
+                            aria-label="Delete chore"
                           >
-                            ← {prevColumn.title}
+                            ✕
+                          </button>
+                        </div>
+
+                        <div className="flex items-center gap-2 mt-2">
+                          <button
+                            onClick={() => cycleFrequency(task.id)}
+                            className="text-[11px] font-medium text-gray-400 bg-gray-950 border border-gray-700 rounded-full px-2 py-0.5 hover:text-gray-200 hover:border-gray-600 transition-colors"
+                            title="Click to change how often this chore repeats"
+                          >
+                            🔁 {freq.label}
+                          </button>
+                          {task.nextDueAt !== null && task.column !== "todo" && (
+                            <span className="text-[11px] text-gray-500">
+                              Due {formatDueDate(task.nextDueAt)}
+                            </span>
+                          )}
+                        </div>
+
+                        <div className="flex gap-2 mt-3">
+                          {prevColumn && (
+                            <button
+                              onClick={() => moveTask(task.id, prevColumn.id)}
+                              className="flex-1 bg-gray-950 hover:bg-black active:bg-black border border-gray-700 text-gray-300 text-xs font-medium py-2 rounded-md transition-colors"
+                            >
+                              ← {prevColumn.title}
+                            </button>
+                          )}
+                          {nextColumn && (
+                            <button
+                              onClick={() => moveTask(task.id, nextColumn.id)}
+                              className="flex-1 bg-gray-950 hover:bg-black active:bg-black border border-gray-700 text-gray-300 text-xs font-medium py-2 rounded-md transition-colors"
+                            >
+                              {nextColumn.title} →
+                            </button>
+                          )}
+                        </div>
+
+                        {task.column === "todo" && (
+                          <button
+                            onClick={() => sendToAppleReminders(task.title)}
+                            className="mt-2 w-full flex items-center justify-center gap-1.5 bg-gray-950 hover:bg-black active:bg-black border border-gray-700 text-gray-200 text-xs font-medium py-2.5 rounded-md transition-colors"
+                          >
+                            🍎 Send to Apple Reminders
                           </button>
                         )}
-                        {nextColumn && (
-                          <button
-                            onClick={() => moveTask(task.id, nextColumn.id)}
-                            className="flex-1 bg-gray-950 hover:bg-black active:bg-black border border-gray-700 text-gray-300 text-xs font-medium py-2 rounded-md transition-colors"
-                          >
-                            {nextColumn.title} →
-                          </button>
-                        )}
                       </div>
-
-                      {task.column === "todo" && (
-                        <button
-                          onClick={() => sendToAppleReminders(task.title)}
-                          className="mt-2 w-full flex items-center justify-center gap-1.5 bg-gray-950 hover:bg-black active:bg-black border border-gray-700 text-gray-200 text-xs font-medium py-2.5 rounded-md transition-colors"
-                        >
-                          🍎 Send to Apple Reminders
-                        </button>
-                      )}
-                    </div>
-                  ))}
+                    );
+                  })}
 
                   {columnTasks.length === 0 && (
                     <div className="flex-1 flex items-center justify-center text-xs text-gray-600 border border-dashed border-gray-800 rounded-lg py-8">
