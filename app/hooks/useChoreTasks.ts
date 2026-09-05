@@ -3,33 +3,66 @@
 import { useEffect, useRef, useState } from "react";
 
 export type ColumnId = "backlog" | "todo" | "done";
-export type Frequency = "daily" | "weekly" | "monthly" | "none";
+export type Frequency =
+  | "daily"
+  | "weekly"
+  | "biweekly"
+  | "monthly"
+  | "custom"
+  | "none";
+export type Assignee = "unassigned" | "me" | "roommate";
 
 export type Task = {
   id: string;
   title: string;
   column: ColumnId;
   frequency: Frequency;
+  /** Only meaningful when frequency === "custom". */
+  customDays: number;
   /** Timestamp (ms) when this chore should automatically reappear in To Do. */
   nextDueAt: number | null;
+  assignee: Assignee;
 };
 
 const STORAGE_KEY = "chore-kanban-tasks";
+const DELETE_UNDO_MS = 5000;
+const DEFAULT_CUSTOM_DAYS = 3;
 
-export const FREQUENCIES: { id: Frequency; label: string; ms: number }[] = [
-  { id: "daily", label: "Daily", ms: 24 * 60 * 60 * 1000 },
-  { id: "weekly", label: "Weekly", ms: 7 * 24 * 60 * 60 * 1000 },
-  { id: "monthly", label: "Monthly", ms: 30 * 24 * 60 * 60 * 1000 },
-  { id: "none", label: "One-off", ms: 0 },
+export const FREQUENCIES: { id: Frequency; label: string }[] = [
+  { id: "daily", label: "Daily" },
+  { id: "weekly", label: "Weekly" },
+  { id: "biweekly", label: "Biweekly" },
+  { id: "monthly", label: "Monthly" },
+  { id: "custom", label: "Custom" },
+  { id: "none", label: "One-time" },
 ];
 
-function frequencyMs(frequency: Frequency): number {
-  return FREQUENCIES.find((f) => f.id === frequency)?.ms ?? 0;
+export const ASSIGNEES: { id: Assignee; label: string; initial: string }[] = [
+  { id: "unassigned", label: "Unassigned", initial: "?" },
+  { id: "me", label: "Me", initial: "B" },
+  { id: "roommate", label: "Roommate", initial: "P" },
+];
+
+const PRESET_MS: Record<string, number> = {
+  daily: 24 * 60 * 60 * 1000,
+  weekly: 7 * 24 * 60 * 60 * 1000,
+  biweekly: 14 * 24 * 60 * 60 * 1000,
+  monthly: 30 * 24 * 60 * 60 * 1000,
+};
+
+function frequencyMs(task: Pick<Task, "frequency" | "customDays">): number {
+  if (task.frequency === "custom") return task.customDays * 24 * 60 * 60 * 1000;
+  return PRESET_MS[task.frequency] ?? 0;
 }
 
-function nextFrequency(frequency: Frequency): Frequency {
-  const idx = FREQUENCIES.findIndex((f) => f.id === frequency);
-  return FREQUENCIES[(idx + 1) % FREQUENCIES.length].id;
+/** Recomputes nextDueAt when a chore enters Done or its recurrence changes. */
+function withColumn(task: Task, column: ColumnId): Task {
+  const enteringDone = column === "done" && task.column !== "done";
+  const nextDueAt =
+    enteringDone && task.frequency !== "none"
+      ? Date.now() + frequencyMs(task)
+      : task.nextDueAt;
+  return { ...task, column, nextDueAt };
 }
 
 const SEED_CHORES: { title: string; frequency: Frequency }[] = [
@@ -59,7 +92,9 @@ function makeDefaultTasks(): Task[] {
     title,
     column: "backlog",
     frequency,
+    customDays: DEFAULT_CUSTOM_DAYS,
     nextDueAt: null,
+    assignee: "unassigned",
   }));
 }
 
@@ -71,7 +106,14 @@ function normalizeTask(raw: Partial<Task> & Record<string, unknown>): Task {
     frequency: FREQUENCIES.some((f) => f.id === raw.frequency)
       ? (raw.frequency as Frequency)
       : "weekly",
+    customDays:
+      typeof raw.customDays === "number" && raw.customDays > 0
+        ? raw.customDays
+        : DEFAULT_CUSTOM_DAYS,
     nextDueAt: typeof raw.nextDueAt === "number" ? raw.nextDueAt : null,
+    assignee: ASSIGNEES.some((a) => a.id === raw.assignee)
+      ? (raw.assignee as Assignee)
+      : "unassigned",
   };
 }
 
@@ -112,7 +154,9 @@ function promoteDueTasks(tasks: Task[]): Task[] {
  */
 export function useChoreTasks() {
   const [tasks, setTasks] = useState<Task[]>([]);
+  const [pendingDelete, setPendingDelete] = useState<{ id: string; title: string } | null>(null);
   const hasHydrated = useRef(false);
+  const deleteTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     setTasks(promoteDueTasks(loadTasks()));
@@ -132,6 +176,12 @@ export function useChoreTasks() {
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(tasks));
   }, [tasks]);
 
+  useEffect(() => {
+    return () => {
+      if (deleteTimeoutRef.current) clearTimeout(deleteTimeoutRef.current);
+    };
+  }, []);
+
   function addTask(title: string) {
     const trimmed = title.trim();
     if (!trimmed) return;
@@ -142,44 +192,119 @@ export function useChoreTasks() {
         title: trimmed,
         column: "backlog",
         frequency: "weekly",
+        customDays: DEFAULT_CUSTOM_DAYS,
         nextDueAt: null,
+        assignee: "unassigned",
       },
     ]);
   }
 
+  function renameTask(id: string, title: string) {
+    const trimmed = title.trim();
+    if (!trimmed) return;
+    setTasks((prev) => prev.map((t) => (t.id === id ? { ...t, title: trimmed } : t)));
+  }
+
+  // Deleting stages the task for removal instead of dropping it immediately,
+  // so the UI can offer a few seconds of "Undo" before it's actually gone.
   function deleteTask(id: string) {
-    setTasks((prev) => prev.filter((t) => t.id !== id));
+    const task = tasks.find((t) => t.id === id);
+    if (!task) return;
+
+    if (deleteTimeoutRef.current) {
+      clearTimeout(deleteTimeoutRef.current);
+      setTasks((prev) => prev.filter((t) => t.id !== pendingDelete?.id));
+    }
+
+    setPendingDelete({ id, title: task.title });
+    deleteTimeoutRef.current = setTimeout(() => {
+      setTasks((prev) => prev.filter((t) => t.id !== id));
+      setPendingDelete(null);
+      deleteTimeoutRef.current = null;
+    }, DELETE_UNDO_MS);
+  }
+
+  function undoDelete() {
+    if (deleteTimeoutRef.current) {
+      clearTimeout(deleteTimeoutRef.current);
+      deleteTimeoutRef.current = null;
+    }
+    setPendingDelete(null);
   }
 
   function moveTask(id: string, column: ColumnId) {
+    setTasks((prev) => prev.map((t) => (t.id === id ? withColumn(t, column) : t)));
+  }
+
+  // Moves a dragged card next to a target card, reordering within (or
+  // across) columns. Desktop drag-and-drop only — see the mobile move
+  // buttons for the touch equivalent.
+  function reorderTask(draggedId: string, targetId: string) {
+    if (draggedId === targetId) return;
+    setTasks((prev) => {
+      const dragged = prev.find((t) => t.id === draggedId);
+      const target = prev.find((t) => t.id === targetId);
+      if (!dragged || !target) return prev;
+
+      const updatedDragged = withColumn(dragged, target.column);
+      const withoutDragged = prev.filter((t) => t.id !== draggedId);
+      const targetIndex = withoutDragged.findIndex((t) => t.id === targetId);
+      const next = [...withoutDragged];
+      next.splice(targetIndex, 0, updatedDragged);
+      return next;
+    });
+  }
+
+  function setFrequency(id: string, frequency: Frequency) {
     setTasks((prev) =>
       prev.map((t) => {
         if (t.id !== id) return t;
-        // Completing a recurring chore schedules its next reappearance.
-        const nextDueAt =
-          column === "done" && t.frequency !== "none"
-            ? Date.now() + frequencyMs(t.frequency)
-            : t.nextDueAt;
-        return { ...t, column, nextDueAt };
+        const updated = { ...t, frequency };
+        if (t.column !== "done") return updated;
+        return {
+          ...updated,
+          nextDueAt: frequency === "none" ? null : Date.now() + frequencyMs(updated),
+        };
       })
     );
   }
 
-  function cycleFrequency(id: string) {
+  function setCustomDays(id: string, days: number) {
+    const clamped = Math.max(1, Math.min(365, Math.round(days) || 1));
     setTasks((prev) =>
       prev.map((t) => {
         if (t.id !== id) return t;
-        const frequency = nextFrequency(t.frequency);
-        const nextDueAt =
-          t.column === "done"
-            ? frequency === "none"
-              ? null
-              : Date.now() + frequencyMs(frequency)
-            : t.nextDueAt;
-        return { ...t, frequency, nextDueAt };
+        const updated = { ...t, customDays: clamped };
+        if (t.column !== "done" || t.frequency !== "custom") return updated;
+        return { ...updated, nextDueAt: Date.now() + frequencyMs(updated) };
       })
     );
   }
 
-  return { tasks, addTask, deleteTask, moveTask, cycleFrequency };
+  function cycleAssignee(id: string) {
+    setTasks((prev) =>
+      prev.map((t) => {
+        if (t.id !== id) return t;
+        const order = ASSIGNEES.map((a) => a.id);
+        const idx = order.indexOf(t.assignee);
+        return { ...t, assignee: order[(idx + 1) % order.length] };
+      })
+    );
+  }
+
+  const visibleTasks = tasks.filter((t) => t.id !== pendingDelete?.id);
+
+  return {
+    tasks: visibleTasks,
+    pendingDelete,
+    undoDelete,
+    addTask,
+    renameTask,
+    deleteTask,
+    moveTask,
+    reorderTask,
+    setFrequency,
+    setCustomDays,
+    cycleAssignee,
+  };
 }
