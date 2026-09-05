@@ -64,19 +64,27 @@ export async function fetchRandomRecipes(count: number): Promise<Recipe[]> {
 
 /**
  * TheMealDB's list.php?a=list now returns every country in the world (most
- * with zero recipes), not just areas with actual data, so this is the fixed
- * set of areas confirmed to return results from filter.php.
+ * with zero recipes) rather than just areas with actual data, and its area
+ * naming is inconsistent — some are demonyms ("Chinese"), others are
+ * country names ("France", "India", "Netherlands", "United States") — so
+ * guessing names is unreliable. This list was derived by scanning every
+ * recipe via search.php?f=<letter> for a-z and collecting the distinct
+ * strArea values that actually appear, then confirming each returns
+ * results from filter.php.
  */
 export const CUISINES = [
-  "American",
+  "Algerian",
+  "Argentina",
+  "Australian",
   "British",
   "Canadian",
   "Chinese",
   "Croatian",
-  "Dutch",
   "Egyptian",
-  "French",
+  "Filipino",
+  "France",
   "Greek",
+  "India",
   "Irish",
   "Italian",
   "Jamaican",
@@ -85,15 +93,22 @@ export const CUISINES = [
   "Malaysian",
   "Mexican",
   "Moroccan",
+  "Netherlands",
+  "Norway",
   "Polish",
   "Portuguese",
   "Russian",
+  "Saudi Arabian",
+  "Slovakia",
   "Spanish",
+  "Syrian",
   "Thai",
   "Tunisian",
   "Turkish",
   "Ukrainian",
+  "United States",
   "Uruguayan",
+  "Venezuela",
   "Vietnamese",
 ];
 
