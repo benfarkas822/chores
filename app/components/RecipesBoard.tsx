@@ -233,13 +233,28 @@ export default function RecipesBoard() {
 
                     {isExpanded && (
                       <div className="mb-2.5 text-[12.5px] leading-[1.5]" style={{ color: "var(--text-secondary)" }}>
-                        <ul className="m-0 mb-2 pl-4 list-disc">
+                        <p className="m-0 mb-1 font-bold uppercase text-[10.5px] tracking-[0.06em]" style={{ color: "var(--text-muted)" }}>
+                          Ingredients
+                        </p>
+                        <ul className="m-0 mb-3 pl-4 list-disc">
                           {r.ingredients.map((ing) => (
                             <li key={ing.name}>
                               {ing.measure} {ing.name}
                             </li>
                           ))}
                         </ul>
+                        <p className="m-0 mb-1 font-bold uppercase text-[10.5px] tracking-[0.06em]" style={{ color: "var(--text-muted)" }}>
+                          How to Make It
+                        </p>
+                        <ol className="m-0 pl-4 list-decimal flex flex-col gap-1.5">
+                          {r.instructions
+                            .split(/\r?\n+/)
+                            .map((step) => step.trim())
+                            .filter(Boolean)
+                            .map((step, i) => (
+                              <li key={i}>{step}</li>
+                            ))}
+                        </ol>
                       </div>
                     )}
 
@@ -249,7 +264,7 @@ export default function RecipesBoard() {
                         className="flex-1 border-none rounded-lg px-3 py-2 text-[12px] font-bold cursor-pointer"
                         style={{ background: "var(--badge-bg)", color: "var(--text-secondary)" }}
                       >
-                        {isExpanded ? "Hide" : "Ingredients"}
+                        {isExpanded ? "Hide" : "How to Make"}
                       </button>
                       <button
                         onClick={() => addItems(r.ingredients.map((ing) => ing.name))}
